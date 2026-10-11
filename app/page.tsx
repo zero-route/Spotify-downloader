@@ -205,7 +205,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<TrackData | null>(null);
-  const [started, setStarted] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -280,7 +279,6 @@ export default function Home() {
 
   function resetPlayer() {
     audioRef.current?.pause();
-    setStarted(false);
     setPlaying(false);
     setCurrent(0);
     setDuration(0);
@@ -349,8 +347,6 @@ export default function Home() {
     setAudioError("");
 
     if (audio.paused) {
-      setStarted(true);
-
       try {
         await audio.play();
       } catch {
@@ -524,19 +520,6 @@ export default function Home() {
                 <span className="cover-empty">
                   <MusicIcon />
                 </span>
-              )}
-
-              {!started && (
-                <button
-                  type="button"
-                  className="thumb-button"
-                  onClick={togglePlay}
-                  aria-label="Putar lagu"
-                >
-                  <span className="play">
-                    <PlayGlyph />
-                  </span>
-                </button>
               )}
             </div>
 
