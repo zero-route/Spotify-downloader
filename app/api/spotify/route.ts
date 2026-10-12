@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ProviderError, fetchTrack, parseTarget } from "@/lib/spotify";
+import {
+  ProviderError,
+  fetchTrack,
+  parseTarget,
+  resolveShortLink,
+} from "@/lib/spotify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +48,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = await fetchTrack(target);
+    const id = target.id ?? (await resolveShortLink(target.shortUrl ?? ""));
+
+    if (!id) {
+      return fail(
+        "Tautan pendek tidak bisa dibaca. Buka tautannya di Spotify lalu salin tautan lagu lengkap.",
+        400
+      );
+    }
+
+    const data = await fetchTrack(id);
 
     return NextResponse.json(
       { ok: true, data },
