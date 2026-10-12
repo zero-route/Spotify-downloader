@@ -5,14 +5,27 @@ import { useEffect, useRef, useState } from "react";
 const alertSpacing: React.CSSProperties = { margin: "8px auto 0" };
 
 type TrackData = {
-  id: string | null;
+  id: string;
   title: string;
   artist: string | null;
   album: string | null;
+  albumType: string | null;
+  releaseDate: string | null;
+  popularity: number | null;
+  durationMs: number | null;
+  explicit: boolean;
+  isrc: string | null;
   cover: string | null;
   coverDirect: string | null;
   audio: string;
-  spotifyUrl: string | null;
+  spotifyUrl: string;
+  audioInfo: {
+    seconds: number | null;
+    size: string | null;
+    format: string | null;
+    bitrate: number | null;
+  };
+  durationMismatch: { audio: number; expected: number } | null;
   convert: { payload: string; token: string };
 };
 
@@ -39,6 +52,23 @@ function formatTime(value: number) {
   const seconds = Math.floor(value % 60);
 
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatRelease(value: string | null) {
+  if (!value) return null;
+
+  const parts = value.split("-").map(Number);
+
+  if (parts.length === 1) return String(parts[0]);
+
+  const date = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+
+  return date.toLocaleDateString(
+    "id-ID",
+    parts.length === 2
+      ? { month: "short", year: "numeric" }
+      : { day: "numeric", month: "short", year: "numeric" }
+  );
 }
 
 function Icon({
@@ -90,6 +120,35 @@ function ExternalIcon() {
       <path d="M18 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" />
       <path d="M15 3h6v6" />
       <path d="M10 14 21 3" />
+    </Icon>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </Icon>
+  );
+}
+
+function TrendIcon() {
+  return (
+    <Icon>
+      <path d="m3 17 6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
+    </Icon>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <Icon>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
     </Icon>
   );
 }
@@ -427,6 +486,45 @@ export default function Home() {
     }
   }
 
+  const statList = data
+    ? [
+        data.durationMs !== null
+          ? {
+              key: "duration",
+              name: "Durasi",
+              value: formatTime(data.durationMs / 1000),
+              icon: <ClockIcon />,
+            }
+          : null,
+        data.popularity !== null
+          ? {
+              key: "popularity",
+              name: "Popularitas",
+              value: String(data.popularity),
+              icon: <TrendIcon />,
+            }
+          : null,
+        formatRelease(data.releaseDate)
+          ? {
+              key: "release",
+              name: "Rilis",
+              value: formatRelease(data.releaseDate) as string,
+              icon: <CalendarIcon />,
+            }
+          : null,
+      ].filter((item): item is NonNullable<typeof item> => item !== null)
+    : [];
+
+  const chips = data
+    ? [
+        data.albumType
+          ? data.albumType.charAt(0).toUpperCase() + data.albumType.slice(1)
+          : null,
+        data.explicit ? "Explicit" : null,
+        data.isrc ? `ISRC ${data.isrc}` : null,
+      ].filter((item): item is string => item !== null)
+    : [];
+
   const progress = duration > 0 ? Math.min(100, (current / duration) * 100) : 0;
 
   return (
@@ -571,6 +669,20 @@ export default function Home() {
               <span className="time">{formatTime(duration)}</span>
             </div>
 
+            {data.durationMismatch && (
+              <div className="alert" role="status" style={alertSpacing}>
+                <span className="alert-icon">i</span>
+                <div>
+                  <strong>Durasi audio berbeda dari lagu aslinya</strong>
+                  <p>
+                    Audio berdurasi {formatTime(data.durationMismatch.audio)},
+                    sedangkan lagu di Spotify {formatTime(data.durationMismatch.expected)}.
+                    Kemungkinan ini versi lain dari lagu yang sama.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {audioError && (
               <div className="alert" role="alert" style={alertSpacing}>
                 <span className="alert-icon">!</span>
@@ -664,18 +776,43 @@ export default function Home() {
                 )}
               </div>
 
-              {data.spotifyUrl && (
-                <a
-                  className="btn btn-outline"
-                  href={data.spotifyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <ExternalIcon />
-                  <span>Buka di Spotify</span>
-                </a>
-              )}
+              <a
+                className="btn btn-outline"
+                href={data.spotifyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalIcon />
+                <span>Buka di Spotify</span>
+              </a>
             </div>
+
+            <div
+              className="stats"
+              style={{
+                gridTemplateColumns: `repeat(${statList.length}, minmax(0, 1fr))`,
+              }}
+            >
+              {statList.map((stat) => (
+                <div className="stat" key={stat.key}>
+                  <div className="stat-top">
+                    {stat.icon}
+                    <strong>{stat.value}</strong>
+                  </div>
+                  <span>{stat.name}</span>
+                </div>
+              ))}
+            </div>
+
+            {chips.length > 0 && (
+              <div className="hashtag-list chips">
+                {chips.map((chip) => (
+                  <span className="hashtag" key={chip}>
+                    {chip}
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
         </>
       )}
