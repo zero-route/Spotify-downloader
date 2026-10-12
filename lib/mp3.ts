@@ -16,6 +16,7 @@ export type Mp3Input = {
   title: string;
   artist: string | null;
   album: string | null;
+  year: string | null;
 };
 
 export type Mp3Result = {
@@ -190,6 +191,10 @@ function encodeArgs(
 
   if (input.album) {
     args.push("-metadata", `album=${input.album}`);
+  }
+
+  if (input.year) {
+    args.push("-metadata", `date=${input.year}`);
   }
 
   args.push("-f", "mp3", outPath);
