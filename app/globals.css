@@ -981,3 +981,18 @@ a {
     width: 100%;
   }
 }
+
+.track {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.info .stats:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.chips {
+  margin-top: 0;
+  padding-top: 14px;
+}
