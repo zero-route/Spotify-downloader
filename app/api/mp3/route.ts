@@ -1,85 +1,261 @@
-import { NextRequest, NextResponse } from "next/server";
-import { verifyUrl } from "@/lib/sign";
-import { renderMp3 } from "@/lib/mp3";
+import ffmpegPath from "ffmpeg-static";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
-function text(value: unknown, max: number) {
-  return typeof value === "string" && value.trim()
-    ? value.trim().slice(0, max)
-    : null;
+const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
+const MAX_COVER_BYTES = 8 * 1024 * 1024;
+
+export type Mp3Input = {
+  audioUrl: string;
+  coverUrl: string | null;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  year: string | null;
+};
+
+export type Mp3Result = {
+  buffer: Buffer;
+  coverEmbedded: boolean;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function fail(error: string, status: number) {
-  return NextResponse.json({ error }, { status });
+function assertHttps(value: string) {
+  const url = new URL(value);
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("URL aset tidak valid.");
+  }
+
+  return url;
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = (await request.json().catch(() => null)) as {
-      payload?: unknown;
-      token?: unknown;
-    } | null;
+async function download(rawUrl: string, maxBytes: number, accept: string) {
+  const url = assertHttps(rawUrl);
+  let lastError = "Gagal mengambil aset.";
 
-    if (
-      !body ||
-      typeof body.payload !== "string" ||
-      typeof body.token !== "string" ||
-      body.payload.length > 8192 ||
-      !verifyUrl(body.payload, body.token)
-    ) {
-      return fail("Data konversi tidak valid. Muat ulang lagu lalu coba lagi.", 403);
-    }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        redirect: "follow",
+        cache: "no-store",
+        headers: { Accept: accept, "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(25_000),
+      });
 
-    const data = JSON.parse(body.payload) as Record<string, unknown>;
-    const audioUrl = text(data.a, 4096);
+      if (!response.ok || !response.body) {
+        lastError = `Server media HTTP ${response.status}`;
+      } else {
+        const declared = Number(response.headers.get("content-length") || 0);
 
-    if (!audioUrl) {
-      return fail("Data konversi tidak valid.", 400);
-    }
-
-    const result = await renderMp3({
-      audioUrl,
-      coverUrl: text(data.c, 4096),
-      title: text(data.t, 300) ?? "Lagu",
-      artist: text(data.r, 300),
-      album: text(data.l, 300),
-    });
-
-    const bytes = new Uint8Array(result.buffer);
-    const chunkSize = 256 * 1024;
-    let offset = 0;
-
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (offset >= bytes.length) {
-          controller.close();
-          return;
+        if (declared > maxBytes) {
+          throw new Error("Ukuran aset melebihi batas.");
         }
 
-        controller.enqueue(bytes.subarray(offset, offset + chunkSize));
-        offset += chunkSize;
-      },
+        const reader = response.body.getReader();
+        const chunks: Buffer[] = [];
+        let total = 0;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            total += value.byteLength;
+
+            if (total > maxBytes) {
+              await reader.cancel();
+              throw new Error("Ukuran aset melebihi batas.");
+            }
+
+            chunks.push(Buffer.from(value));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        if (total > 0) {
+          return Buffer.concat(chunks);
+        }
+
+        lastError = "Aset kosong.";
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : lastError;
+
+      if (lastError === "Ukuran aset melebihi batas.") {
+        throw new Error(lastError);
+      }
+    }
+
+    await sleep(500 * attempt);
+  }
+
+  throw new Error(lastError);
+}
+
+function run(command: string, args: string[], timeoutMs: number) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderr = "";
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-8000);
     });
 
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Content-Length": String(bytes.length),
-        "Content-Disposition": 'attachment; filename="tunesave.mp3"',
-        "Cache-Control": "no-store",
-        "X-Cover-Embedded": result.coverEmbedded ? "1" : "0",
-      },
-    });
-  } catch (error) {
-    console.error("[mp3]", error);
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("Proses konversi melewati batas waktu."));
+    }, timeoutMs);
 
-    return fail(
-      error instanceof Error ? error.message : "Gagal membuat file MP3.",
-      500
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+
+      if (code !== 0) {
+        reject(new Error(`Konversi gagal: ${stderr.slice(-1500)}`));
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function encodeArgs(
+  audioPath: string,
+  coverPath: string | null,
+  outPath: string,
+  input: Mp3Input
+) {
+  const args = ["-hide_banner", "-nostats", "-y", "-i", audioPath];
+
+  if (coverPath) {
+    args.push("-i", coverPath);
+  }
+
+  args.push("-map", "0:a:0");
+
+  if (coverPath) {
+    args.push(
+      "-map",
+      "1:v:0",
+      "-c:v",
+      "mjpeg",
+      "-q:v",
+      "2",
+      "-vf",
+      "scale=640:640:force_original_aspect_ratio=increase,crop=640:640",
+      "-disposition:v:0",
+      "attached_pic",
+      "-metadata:s:v",
+      "title=Album cover",
+      "-metadata:s:v",
+      "comment=Cover (front)"
     );
+  }
+
+  args.push(
+    "-c:a",
+    "libmp3lame",
+    "-b:a",
+    "320k",
+    "-ar",
+    "44100",
+    "-id3v2_version",
+    "3",
+    "-write_id3v1",
+    "1",
+    "-metadata",
+    `title=${input.title}`
+  );
+
+  if (input.artist) {
+    args.push("-metadata", `artist=${input.artist}`);
+  }
+
+  if (input.album) {
+    args.push("-metadata", `album=${input.album}`);
+  }
+
+  if (input.year) {
+    args.push("-metadata", `date=${input.year}`);
+  }
+
+  args.push("-f", "mp3", outPath);
+
+  return args;
+}
+
+export async function renderMp3(input: Mp3Input): Promise<Mp3Result> {
+  if (!ffmpegPath) {
+    throw new Error("ffmpeg tidak tersedia di server.");
+  }
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tunesave-"));
+
+  try {
+    const audioPath = path.join(dir, "audio.bin");
+    const coverPath = path.join(dir, "cover.bin");
+    const outPath = path.join(dir, "out.mp3");
+
+    const [audio, cover] = await Promise.all([
+      download(input.audioUrl, MAX_AUDIO_BYTES, "*/*"),
+      input.coverUrl
+        ? download(
+            input.coverUrl,
+            MAX_COVER_BYTES,
+            "image/jpeg,image/png,image/webp,image/*;q=0.8,*/*;q=0.5"
+          ).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    await writeFile(audioPath, audio);
+
+    let coverEmbedded = false;
+
+    if (cover) {
+      await writeFile(coverPath, cover);
+
+      try {
+        await run(
+          ffmpegPath,
+          encodeArgs(audioPath, coverPath, outPath, input),
+          50_000
+        );
+        coverEmbedded = true;
+      } catch (error) {
+        console.error("[mp3] dengan cover gagal, coba tanpa cover", error);
+      }
+    }
+
+    if (!coverEmbedded) {
+      await run(ffmpegPath, encodeArgs(audioPath, null, outPath, input), 50_000);
+    }
+
+    const info = await stat(outPath);
+
+    if (info.size < 1024) {
+      throw new Error("Hasil konversi kosong.");
+    }
+
+    return { buffer: await readFile(outPath), coverEmbedded };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
