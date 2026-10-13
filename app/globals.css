@@ -195,13 +195,13 @@ a {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #68783c 0%, #829365 100%);
-  color: #fff;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+  background: linear-gradient(135deg, #1DB954 0%, #69DB91 100%);
+  color: #07170D;
+  text-shadow: none;
 }
 
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  filter: brightness(1.06);
 }
 
 .btn-primary .spinner {
