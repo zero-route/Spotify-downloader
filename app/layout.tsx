@@ -5,6 +5,11 @@ export const metadata: Metadata = {
   title: "TuneSave - Spotify Downloader",
   description:
     "Unduh lagu Spotify sebagai MP3 lengkap dengan cover dan info lagu.",
+    icons: {
+      icon: "/icon.png", 
+      shortcut: "/icon.png", 
+      apple: "/icon.png", 
+    }
 };
 
 export const viewport: Viewport = {
