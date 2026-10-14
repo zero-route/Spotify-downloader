@@ -6,9 +6,9 @@ export const metadata: Metadata = {
   description:
     "Unduh lagu Spotify sebagai MP3 lengkap dengan cover dan info lagu.",
     icons: {
-      icon: "/logo.png", 
-      shortcut: "/logo.png", 
-      apple: "/logo.png"
+      icon: "/icon.png", 
+      shortcut: "/icon.png", 
+      apple: "/icon.png"
     }, 
 };
 
