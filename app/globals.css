@@ -136,12 +136,17 @@ a {
 }
 
 .field:focus-within {
-  border-color: #77797d;
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgba(22, 255, 35, 0.12);
 }
 
 .field-icon {
   display: flex;
   flex-shrink: 0;
+}
+
+.field:focus-within .field-icon {
+  color: var(--green);
 }
 
 .field input {
