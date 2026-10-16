@@ -14,6 +14,8 @@
   --radius-sm: 10px;
   --green: #1db954;
   --green-deep: #138a3e;
+    --brand: linear-gradient(110deg, #f4f4f5 0%, #1db954 42%, #138a3e 78%, #1db954 100%);
+
 }
 
 * {
@@ -80,7 +82,10 @@ a {
 }
 
 .brand {
-  color: var(--text);
+  background: var(--brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.04em;
